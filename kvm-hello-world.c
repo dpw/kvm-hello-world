@@ -98,10 +98,8 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	}
 }
 
-const unsigned char code16[] = {
-	0xb0, 42, /* MOV AL, 42 */
-	0xf4, /* HLT */
-};
+
+extern const unsigned char code16[], code16_end[];
 
 int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 {
@@ -132,7 +130,7 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code16, sizeof code16);
+	memcpy(vm->mem, code16, code16_end-code16);
 
 	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
 		perror("KVM_RUN");
@@ -174,10 +172,7 @@ void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
 		| (seg->base & 0xff000000ULL) << 56; /* Base bits 24:31 */
 }
 
-const unsigned char code32[] = {
-	0xb8, 42, 0, 0, 0, /* MOV EAX, 42 */
-	0xf4, /* HLT */
-};
+extern const unsigned char code32[], code32_end[];
 
 int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 {
@@ -235,7 +230,7 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code32, sizeof code32);
+	memcpy(vm->mem, code32, code32_end-code32);
 
 	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
 		perror("KVM_RUN");
