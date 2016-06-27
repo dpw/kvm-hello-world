@@ -107,6 +107,8 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 	struct kvm_regs regs;
 	int res;
 
+	printf("Testing real mode\n");
+
         if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
 		perror("KVM_GET_SREGS");
 		exit(1);
@@ -174,7 +176,7 @@ void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
 
 extern const unsigned char code32[], code32_end[];
 
-int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
+static void setup_prot32_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
@@ -187,33 +189,41 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 		.l = 0,
 		.g = 1, /* 4KB granularity */
 	};
+	uint64_t *gdt;
 
+	sregs->cr0 |= 1; /* set PE: enter protected mode */
+	sregs->gdt.base = 4096;
+	sregs->gdt.limit = 3 * 8 - 1;
+
+	gdt = (void *)(vm->mem + sregs->gdt.base);
+	/* gdt[0] is the null segment */
+
+	seg.type = 11; /* Code: execute, read, accessed */
+	seg.selector = 1;
+	fill_segment_descriptor(gdt, &seg);
+	sregs->cs = seg;
+
+	seg.type = 3; /* Data: read/write, accessed */
+	seg.selector = 2;
+	fill_segment_descriptor(gdt, &seg);
+	sregs->cs = sregs->ds = sregs->es = sregs->fs = sregs->gs
+		= sregs->ss = seg;
+}
+
+int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
+{
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
 	int res;
-	uint64_t *gdt;
+
+	printf("Testing protected 32-bit mode\n");
 
         if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
 		perror("KVM_GET_SREGS");
 		exit(1);
 	}
 
-	sregs.cr0 |= 1; /* set PE: enter protected mode */
-	sregs.gdt.base = 4096;
-	sregs.gdt.limit = 3 * 8 - 1;
-
-	gdt = (void *)(vm->mem + sregs.gdt.base);
-	/* gdt[0] is the null segment */
-
-	seg.type = 11; /* Code: execute, read, accessed */
-	seg.selector = 1;
-	fill_segment_descriptor(gdt, &seg);
-	sregs.cs = seg;
-
-	seg.type = 3; /* Data: read/write, accessed */
-	seg.selector = 2;
-	fill_segment_descriptor(gdt, &seg);
-	sregs.cs = sregs.ds = sregs.es = sregs.fs = sregs.gs = sregs.ss = seg;
+	setup_prot32_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
 		perror("KVM_SET_SREGS");
@@ -255,14 +265,98 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 	return res;
 }
 
+extern const unsigned char code32_paged[], code32_paged_end[];
+
+static void setup_paged_mode(struct vm *vm, struct kvm_sregs *sregs)
+{
+	uint32_t pd_addr = 0x2000;
+	uint32_t *pd = (void *)(vm->mem + pd_addr);
+
+	/* A single 4MB page to cover the memory region */
+	pd[0] = 1 << 0 /* Present */
+		| 1 << 1 /* R/W */
+		| 1 << 2 /* Allow user-mode accesses */
+		| 1 << 7; /* 4MB page */
+	/* Other PDEs are left zeroed, meaning not present. */
+
+	sregs->cr3 = pd_addr;
+	sregs->cr4 = 1 << 4; /* Page size extensions (4MB pages) */
+	sregs->cr0 = 1 /* PE (protection enable) */
+		| 1 << 1 /* MP (monitor coprocessor) */
+		| 1 << 4 /* ET (extension type) */
+		| 1 << 5 /* NE (numeric error) */
+		| 1 << 16 /* WP (write protect) */
+		| 1 << 18; /* AM (alignment mask) */
+
+	/* We don't set cr3.pg here, because that causes a vm entry
+	   failure. It's not clear why.  Instead, we set it in the VM
+	   code. */
+}
+
+int run_prot32_paged_mode(struct vm *vm, struct vcpu *vcpu)
+{
+	struct kvm_sregs sregs;
+	struct kvm_regs regs;
+	int res;
+
+	printf("Testing protected 32-bit mode with paging\n");
+
+        if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
+		perror("KVM_GET_SREGS");
+		exit(1);
+	}
+
+	setup_prot32_mode(vm, &sregs);
+	setup_paged_mode(vm, &sregs);
+
+        if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
+		perror("KVM_SET_SREGS");
+		exit(1);
+	}
+
+	memset(&regs, 0, sizeof(regs));
+	/* Clear all FLAGS bits, except bit 1 which is always set. */
+	regs.rflags = 2;
+	regs.rip = 0;
+
+	if (ioctl(vcpu->fd, KVM_SET_REGS, &regs) < 0) {
+		perror("KVM_SET_REGS");
+		exit(1);
+	}
+
+	memcpy(vm->mem, code32_paged, code32_paged_end-code32_paged);
+
+	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+		perror("KVM_RUN");
+		exit(1);
+	}
+
+	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
+		fprintf(stderr,
+			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
+			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
+		exit(1);
+	}
+
+	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
+		perror("KVM_GET_REGS");
+		exit(1);
+	}
+
+	res = (regs.rax == 42);
+	printf("RAX = %lld: %s\n", regs.rax,
+	       res ? "OK" : "wrong");
+	return res;
+}
+
 int main(int argc, char **argv)
 {
 	struct vm vm;
 	struct vcpu vcpu;
-	enum { REAL_MODE, PROT32_MODE } mode = REAL_MODE;
+	enum { REAL_MODE, PROT32_MODE, PROT32_PAGED_MODE } mode = REAL_MODE;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "rs")) != -1) {
+	while ((opt = getopt(argc, argv, "rsp")) != -1) {
 		switch (opt) {
 		case 'r':
 			mode = REAL_MODE;
@@ -272,8 +366,13 @@ int main(int argc, char **argv)
 			mode = PROT32_MODE;
 			break;
 
+		case 'p':
+			mode = PROT32_PAGED_MODE;
+			break;
+
 		default:
-			fprintf(stderr, "Usage: %s [ -r | -s ]\n", argv[0]);
+			fprintf(stderr, "Usage: %s [ -r | -s | -p ]\n",
+				argv[0]);
 			return 1;
 		}
 	}
@@ -287,6 +386,9 @@ int main(int argc, char **argv)
 
 	case PROT32_MODE:
 		return !run_prot32_mode(&vm, &vcpu);
+
+	case PROT32_PAGED_MODE:
+		return !run_prot32_paged_mode(&vm, &vcpu);
 	}
 
 	return 1;
