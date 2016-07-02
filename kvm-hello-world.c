@@ -98,6 +98,30 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	}
 }
 
+int check(struct vm *vm, struct vcpu *vcpu, size_t sz)
+{
+	struct kvm_regs regs;
+	uint64_t memval = 0;
+
+	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
+		perror("KVM_GET_REGS");
+		exit(1);
+	}
+
+	if (regs.rax != 42) {
+		printf("Wrong result: {E,R,}AX is %lld\n", regs.rax);
+		return 0;
+	}
+
+	memcpy(&memval, &vm->mem[0x400], sz);
+	if (memval != 42) {
+		printf("Wrong result: memory at 0x400 is %lld\n",
+		       (unsigned long long)memval);
+		return 0;
+	}
+
+	return 1;
+}
 
 extern const unsigned char code16[], code16_end[];
 
@@ -105,7 +129,6 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 {
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
-	int res;
 
 	printf("Testing real mode\n");
 
@@ -146,15 +169,7 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
-		perror("KVM_GET_REGS");
-		exit(1);
-	}
-
-	res = (regs.rax == 42);
-	printf("RAX = %lld: %s\n", regs.rax,
-	       res ? "OK" : "wrong");
-	return res;
+	return check(vm, vcpu, 2);
 }
 
 void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
@@ -214,7 +229,6 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 {
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
-	int res;
 
 	printf("Testing protected 32-bit mode\n");
 
@@ -254,15 +268,7 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
-		perror("KVM_GET_REGS");
-		exit(1);
-	}
-
-	res = (regs.rax == 42);
-	printf("RAX = %lld: %s\n", regs.rax,
-	       res ? "OK" : "wrong");
-	return res;
+	return check(vm, vcpu, 4);
 }
 
 extern const unsigned char code32_paged[], code32_paged_end[];
@@ -297,7 +303,6 @@ int run_prot32_paged_mode(struct vm *vm, struct vcpu *vcpu)
 {
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
-	int res;
 
 	printf("Testing protected 32-bit mode with paging\n");
 
@@ -338,15 +343,7 @@ int run_prot32_paged_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
-		perror("KVM_GET_REGS");
-		exit(1);
-	}
-
-	res = (regs.rax == 42);
-	printf("RAX = %lld: %s\n", regs.rax,
-	       res ? "OK" : "wrong");
-	return res;
+	return check(vm, vcpu, 4);
 }
 
 int main(int argc, char **argv)
