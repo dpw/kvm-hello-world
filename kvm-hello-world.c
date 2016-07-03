@@ -294,8 +294,8 @@ static void setup_paged_mode(struct vm *vm, struct kvm_sregs *sregs)
 		| 1 << 16 /* WP (write protect) */
 		| 1 << 18; /* AM (alignment mask) */
 
-	/* We don't set cr3.pg here, because that causes a vm entry
-	   failure. It's not clear why.  Instead, we set it in the VM
+	/* We don't set cr0.pg here, because that causes a vm entry
+	   failure. It's not clear why. Instead, we set it in the VM
 	   code. */
 }
 
