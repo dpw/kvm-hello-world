@@ -2,9 +2,10 @@
 
 kvm-hello-world is a very simple example program to demonstrate the
 use of the KVM API provided by the Linux kernel.  It acts as a very
-simple VM host, and runs a trivial real-mode program in a VM.  I
-tested it on Intel processors with the VMX hardware virtualization
-extensions.  It *might* work on AMD processors with AMD-V.
+simple VM host, and runs a trivial program in a VM.  I tested it on
+Intel processors with the VMX hardware virtualization extensions.  It
+*might* work on AMD processors with AMD-V, but that hasn't been
+tested.
 
 ## Background
 
@@ -35,7 +36,8 @@ demonstration of how simple and clean a KVM-based full-system emulator
 can be, it's still far more than a bare-bones example.
 
 So, as no such example seems to exist, I wrote one by studying api.txt
-and the kvmtool sources.
+and the kvmtool sources.  (Update: When I wrote this, I had overlooked
+https://github.com/soulxu/kvmsample).
 
 ## Notes
 
@@ -47,21 +49,14 @@ The code is straightforward.  It:
 * Makes a `KVM_CREATE_VCPU` call to creates a VCPU within the VM, and
   mmaps its control area.
 * Sets the FLAGS and CS:IP registers of the VCPU.
-* Copies a few bytes of real mode code into the VM memory.
+* Copies a few bytes of code into the VM memory.
 * Makes a `KVM_RUN` call to execute the VCPU.
 * Checks that the VCPU execution had the expected result.
 
 A couple of aspects are worth noting:
 
-The test code runs in real mode because there is far less set-up
-needed to enter real mode, compared to protected mode (where it is
-necessary to set up the control registers and data structures to
-support segmentation, even with paging disabled), or 64-bit mode
-(where is it necessary to set up all the control register and data
-structures to support paging).
-
-Note that initial Intel VMX extensions did not implement support for
-real mode.  In fact, they restricted VMX guests to paged protected
+Note that the Intel VMX extensions did not initially implement support
+for real mode.  In fact, they restricted VMX guests to paged protected
 mode.  VM hosts were expected to emulate the unsupported modes in
 software, only employing VMX when a guest had entered paged protected
 mode (KVM does not implement such emulation support; I assume it is
