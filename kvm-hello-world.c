@@ -191,7 +191,7 @@ void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
 
 extern const unsigned char code32[], code32_end[];
 
-static void setup_prot32_mode(struct vm *vm, struct kvm_sregs *sregs)
+static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
@@ -225,19 +225,19 @@ static void setup_prot32_mode(struct vm *vm, struct kvm_sregs *sregs)
 		= sregs->ss = seg;
 }
 
-int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
+int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 {
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
 
-	printf("Testing protected 32-bit mode\n");
+	printf("Testing protected mode\n");
 
         if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
 		perror("KVM_GET_SREGS");
 		exit(1);
 	}
 
-	setup_prot32_mode(vm, &sregs);
+	setup_protected_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
 		perror("KVM_SET_SREGS");
@@ -273,7 +273,7 @@ int run_prot32_mode(struct vm *vm, struct vcpu *vcpu)
 
 extern const unsigned char code32_paged[], code32_paged_end[];
 
-static void setup_paged_mode(struct vm *vm, struct kvm_sregs *sregs)
+static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	uint32_t pd_addr = 0x2000;
 	uint32_t *pd = (void *)(vm->mem + pd_addr);
@@ -299,20 +299,20 @@ static void setup_paged_mode(struct vm *vm, struct kvm_sregs *sregs)
 	   code. */
 }
 
-int run_prot32_paged_mode(struct vm *vm, struct vcpu *vcpu)
+int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 {
 	struct kvm_sregs sregs;
 	struct kvm_regs regs;
 
-	printf("Testing protected 32-bit mode with paging\n");
+	printf("Testing 32-bit paging\n");
 
         if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
 		perror("KVM_GET_SREGS");
 		exit(1);
 	}
 
-	setup_prot32_mode(vm, &sregs);
-	setup_paged_mode(vm, &sregs);
+	setup_protected_mode(vm, &sregs);
+	setup_paged_32bit_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
 		perror("KVM_SET_SREGS");
@@ -350,7 +350,7 @@ int main(int argc, char **argv)
 {
 	struct vm vm;
 	struct vcpu vcpu;
-	enum { REAL_MODE, PROT32_MODE, PROT32_PAGED_MODE } mode = REAL_MODE;
+	enum { REAL_MODE, PROTECTED_MODE, PAGED_32BIT_MODE } mode = REAL_MODE;
 	int opt;
 
 	while ((opt = getopt(argc, argv, "rsp")) != -1) {
@@ -360,11 +360,11 @@ int main(int argc, char **argv)
 			break;
 
 		case 's':
-			mode = PROT32_MODE;
+			mode = PROTECTED_MODE;
 			break;
 
 		case 'p':
-			mode = PROT32_PAGED_MODE;
+			mode = PAGED_32BIT_MODE;
 			break;
 
 		default:
@@ -381,11 +381,11 @@ int main(int argc, char **argv)
 	case REAL_MODE:
 		return !run_real_mode(&vm, &vcpu);
 
-	case PROT32_MODE:
-		return !run_prot32_mode(&vm, &vcpu);
+	case PROTECTED_MODE:
+		return !run_protected_mode(&vm, &vcpu);
 
-	case PROT32_PAGED_MODE:
-		return !run_prot32_paged_mode(&vm, &vcpu);
+	case PAGED_32BIT_MODE:
+		return !run_paged_32bit_mode(&vm, &vcpu);
 	}
 
 	return 1;
