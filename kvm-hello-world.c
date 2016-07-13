@@ -9,6 +9,46 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 
+/* CR0 bits */
+#define CR0_PE 1
+#define CR0_MP (1 << 1)
+#define CR0_EM (1 << 2)
+#define CR0_TS (1 << 3)
+#define CR0_ET (1 << 4)
+#define CR0_NE (1 << 5)
+#define CR0_WP (1 << 16)
+#define CR0_AM (1 << 18)
+#define CR0_NW (1 << 29)
+#define CR0_CD (1 << 30)
+#define CR0_PG (1 << 31)
+
+/* CR4 bits */
+#define CR4_VME 1
+#define CR4_PVI (1 << 1)
+#define CR4_TSD (1 << 2)
+#define CR4_DE (1 << 3)
+#define CR4_PSE (1 << 4)
+#define CR4_PAE (1 << 5)
+#define CR4_MCE (1 << 6)
+#define CR4_PGE (1 << 7)
+#define CR4_PCE (1 << 8)
+#define CR4_OSFXSR (1 << 8)
+#define CR4_OSXMMEXCPT (1 << 10)
+#define CR4_UMIP (1 << 11)
+#define CR4_VMXE (1 << 13)
+#define CR4_SMXE (1 << 14)
+#define CR4_FSGSBASE (1 << 16)
+#define CR4_PCIDE (1 << 17)
+#define CR4_OSXSAVE (1 << 18)
+#define CR4_SMEP (1 << 20)
+#define CR4_SMAP (1 << 21)
+
+/* 32-bit page directory entry bits */
+#define PDE32_PRESENT 1
+#define PDE32_RW (1 << 1)
+#define PDE32_USER (1 << 2)
+#define PDE32_PAGE_SIZE (1 << 7)
+
 struct vm {
 	int sys_fd;
 	int fd;
@@ -189,8 +229,6 @@ void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
 		| (seg->base & 0xff000000ULL) << 56; /* Base bits 24:31 */
 }
 
-extern const unsigned char code32[], code32_end[];
-
 static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
@@ -206,7 +244,7 @@ static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 	};
 	uint64_t *gdt;
 
-	sregs->cr0 |= 1; /* set PE: enter protected mode */
+	sregs->cr0 |= CR0_PE; /* enter protected mode */
 	sregs->gdt.base = 4096;
 	sregs->gdt.limit = 3 * 8 - 1;
 
@@ -224,6 +262,8 @@ static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 	sregs->cs = sregs->ds = sregs->es = sregs->fs = sregs->gs
 		= sregs->ss = seg;
 }
+
+extern const unsigned char code32[], code32_end[];
 
 int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 {
@@ -279,20 +319,12 @@ static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 	uint32_t *pd = (void *)(vm->mem + pd_addr);
 
 	/* A single 4MB page to cover the memory region */
-	pd[0] = 1 << 0 /* Present */
-		| 1 << 1 /* R/W */
-		| 1 << 2 /* Allow user-mode accesses */
-		| 1 << 7; /* 4MB page */
+	pd[0] = PDE32_PRESENT | PDE32_RW | PDE32_USER | PDE32_PAGE_SIZE;
 	/* Other PDEs are left zeroed, meaning not present. */
 
 	sregs->cr3 = pd_addr;
-	sregs->cr4 = 1 << 4; /* Page size extensions (4MB pages) */
-	sregs->cr0 = 1 /* PE (protection enable) */
-		| 1 << 1 /* MP (monitor coprocessor) */
-		| 1 << 4 /* ET (extension type) */
-		| 1 << 5 /* NE (numeric error) */
-		| 1 << 16 /* WP (write protect) */
-		| 1 << 18; /* AM (alignment mask) */
+	sregs->cr4 = CR4_PSE;
+	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
 
 	/* We don't set cr0.pg here, because that causes a vm entry
 	   failure. It's not clear why. Instead, we set it in the VM
