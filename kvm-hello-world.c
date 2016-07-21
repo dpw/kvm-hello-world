@@ -43,11 +43,26 @@
 #define CR4_SMEP (1 << 20)
 #define CR4_SMAP (1 << 21)
 
+#define EFER_SCE 1
+#define EFER_LME (1 << 8)
+#define EFER_LMA (1 << 10)
+#define EFER_NXE (1 << 11)
+
 /* 32-bit page directory entry bits */
 #define PDE32_PRESENT 1
 #define PDE32_RW (1 << 1)
 #define PDE32_USER (1 << 2)
-#define PDE32_PAGE_SIZE (1 << 7)
+#define PDE32_PS (1 << 7)
+
+/* 64-bit page * entry bits */
+#define PDE64_PRESENT 1
+#define PDE64_RW (1 << 1)
+#define PDE64_USER (1 << 2)
+#define PDE64_ACCESSED (1 << 5)
+#define PDE64_DIRTY (1 << 6)
+#define PDE64_PS (1 << 7)
+#define PDE64_G (1 << 8)
+
 
 struct vm {
 	int sys_fd;
@@ -214,8 +229,9 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 
 void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
 {
+	uint16_t index = seg->selector >> 3;
 	uint32_t limit = seg->g ? seg->limit >> 12 : seg->limit;
-	dt[seg->selector] = (limit & 0xffff) /* Limit bits 0:15 */
+	dt[index] = (limit & 0xffff) /* Limit bits 0:15 */
 		| (seg->base & 0xffffff) << 16 /* Base bits 0:23 */
 		| (uint64_t)seg->type << 40
 		| (uint64_t)seg->s << 44 /* system or code/data */
@@ -234,7 +250,6 @@ static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 	struct kvm_segment seg = {
 		.base = 0,
 		.limit = 0xffffffff,
-		.selector = 1,
 		.present = 1,
 		.dpl = 0,
 		.db = 1,
@@ -245,21 +260,21 @@ static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 	uint64_t *gdt;
 
 	sregs->cr0 |= CR0_PE; /* enter protected mode */
-	sregs->gdt.base = 4096;
+	sregs->gdt.base = 0x1000;
 	sregs->gdt.limit = 3 * 8 - 1;
 
 	gdt = (void *)(vm->mem + sregs->gdt.base);
 	/* gdt[0] is the null segment */
 
 	seg.type = 11; /* Code: execute, read, accessed */
-	seg.selector = 1;
+	seg.selector = 1 << 3;
 	fill_segment_descriptor(gdt, &seg);
 	sregs->cs = seg;
 
 	seg.type = 3; /* Data: read/write, accessed */
-	seg.selector = 2;
+	seg.selector = 2 << 3;
 	fill_segment_descriptor(gdt, &seg);
-	sregs->cs = sregs->ds = sregs->es = sregs->fs = sregs->gs
+	sregs->ds = sregs->es = sregs->fs = sregs->gs
 		= sregs->ss = seg;
 }
 
@@ -319,12 +334,13 @@ static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 	uint32_t *pd = (void *)(vm->mem + pd_addr);
 
 	/* A single 4MB page to cover the memory region */
-	pd[0] = PDE32_PRESENT | PDE32_RW | PDE32_USER | PDE32_PAGE_SIZE;
+	pd[0] = PDE32_PRESENT | PDE32_RW | PDE32_USER | PDE32_PS;
 	/* Other PDEs are left zeroed, meaning not present. */
 
 	sregs->cr3 = pd_addr;
 	sregs->cr4 = CR4_PSE;
 	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->efer = 0;
 
 	/* We don't set cr0.pg here, because that causes a vm entry
 	   failure. It's not clear why. Instead, we set it in the VM
@@ -378,14 +394,116 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 	return check(vm, vcpu, 4);
 }
 
+extern const unsigned char code64[], code64_end[];
+
+static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
+{
+	struct kvm_segment seg = {
+		.base = 0,
+		.limit = 0xffffffff,
+		.selector = 3 << 3,
+		.present = 1,
+		.type = 11, /* Code: execute, read, accessed */
+		.dpl = 0,
+		.db = 0,
+		.s = 1, /* Code/data */
+		.l = 1,
+		.g = 1, /* 4KB granularity */
+	};
+	uint64_t *gdt = (void *)(vm->mem + sregs->gdt.base);
+
+	sregs->gdt.limit = 4 * 8 - 1;
+
+	fill_segment_descriptor(gdt, &seg);
+}
+
+static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
+{
+	uint64_t pml4_addr = 0x2000;
+	uint64_t *pml4 = (void *)(vm->mem + pml4_addr);
+
+	uint64_t pdpt_addr = 0x3000;
+	uint64_t *pdpt = (void *)(vm->mem + pdpt_addr);
+
+	uint64_t pd_addr = 0x4000;
+	uint64_t *pd = (void *)(vm->mem + pd_addr);
+
+	pml4[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_addr;
+	pdpt[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pd_addr;
+	pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_USER | PDE64_PS;
+
+	sregs->cr3 = pml4_addr;
+	sregs->cr4 = CR4_PAE;
+	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->efer = EFER_LME;
+
+	/* We don't set cr0.pg here, because that causes a vm entry
+	   failure. It's not clear why. Instead, we set it in the VM
+	   code. */
+	setup_64bit_code_segment(vm, sregs);
+}
+
+int run_long_mode(struct vm *vm, struct vcpu *vcpu)
+{
+	struct kvm_sregs sregs;
+	struct kvm_regs regs;
+
+	printf("Testing 64-bit mode\n");
+
+        if (ioctl(vcpu->fd, KVM_GET_SREGS, &sregs) < 0) {
+		perror("KVM_GET_SREGS");
+		exit(1);
+	}
+
+	setup_protected_mode(vm, &sregs);
+	setup_long_mode(vm, &sregs);
+
+        if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
+		perror("KVM_SET_SREGS");
+		exit(1);
+	}
+
+	memset(&regs, 0, sizeof(regs));
+	/* Clear all FLAGS bits, except bit 1 which is always set. */
+	regs.rflags = 2;
+	regs.rip = 0;
+
+	if (ioctl(vcpu->fd, KVM_SET_REGS, &regs) < 0) {
+		perror("KVM_SET_REGS");
+		exit(1);
+	}
+
+	memcpy(vm->mem, code64, code64_end-code64);
+
+	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+		perror("KVM_RUN");
+		exit(1);
+	}
+
+	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
+		fprintf(stderr,
+			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
+			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
+		exit(1);
+	}
+
+	return check(vm, vcpu, 4);
+}
+
+
 int main(int argc, char **argv)
 {
 	struct vm vm;
 	struct vcpu vcpu;
-	enum { REAL_MODE, PROTECTED_MODE, PAGED_32BIT_MODE } mode = REAL_MODE;
+	enum {
+		REAL_MODE,
+		PROTECTED_MODE,
+		PAGED_32BIT_MODE,
+		LONG_MODE,
+	} mode = REAL_MODE;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "rsp")) != -1) {
+	while ((opt = getopt(argc, argv, "rspl")) != -1) {
 		switch (opt) {
 		case 'r':
 			mode = REAL_MODE;
@@ -399,8 +517,12 @@ int main(int argc, char **argv)
 			mode = PAGED_32BIT_MODE;
 			break;
 
+		case 'l':
+			mode = LONG_MODE;
+			break;
+
 		default:
-			fprintf(stderr, "Usage: %s [ -r | -s | -p ]\n",
+			fprintf(stderr, "Usage: %s [ -r | -s | -p | -l ]\n",
 				argv[0]);
 			return 1;
 		}
@@ -418,6 +540,9 @@ int main(int argc, char **argv)
 
 	case PAGED_32BIT_MODE:
 		return !run_paged_32bit_mode(&vm, &vcpu);
+
+	case LONG_MODE:
+		return !run_long_mode(&vm, &vcpu);
 	}
 
 	return 1;
