@@ -433,6 +433,8 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 	/* Clear all FLAGS bits, except bit 1 which is always set. */
 	regs.rflags = 2;
 	regs.rip = 0;
+	/* Create stack at top of 2 MB page and grow down. */
+	regs.rsp = 2 << 20;
 
 	if (ioctl(vcpu->fd, KVM_SET_REGS, &regs) < 0) {
 		perror("KVM_SET_REGS");
@@ -494,7 +496,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	vm_init(&vm, 0x100000);
+	vm_init(&vm, 0x200000);
 	vcpu_init(&vm, &vcpu);
 
 	switch (mode) {
