@@ -20,7 +20,7 @@
 #define CR0_AM (1 << 18)
 #define CR0_NW (1 << 29)
 #define CR0_CD (1 << 30)
-#define CR0_PG (1 << 31)
+#define CR0_PG (1u << 31)
 
 /* CR4 bits */
 #define CR4_VME 1
@@ -227,55 +227,28 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 	return check(vm, vcpu, 2);
 }
 
-void fill_segment_descriptor(uint64_t *dt, struct kvm_segment *seg)
-{
-	uint16_t index = seg->selector >> 3;
-	uint32_t limit = seg->g ? seg->limit >> 12 : seg->limit;
-	dt[index] = (limit & 0xffff) /* Limit bits 0:15 */
-		| (seg->base & 0xffffff) << 16 /* Base bits 0:23 */
-		| (uint64_t)seg->type << 40
-		| (uint64_t)seg->s << 44 /* system or code/data */
-		| (uint64_t)seg->dpl << 45 /* Privilege level */
-		| (uint64_t)seg->present << 47
-		| (limit & 0xf0000ULL) << 48 /* Limit bits 16:19 */
-		| (uint64_t)seg->avl << 52 /* Available for system software */
-		| (uint64_t)seg->l << 53 /* 64-bit code segment */
-		| (uint64_t)seg->db << 54 /* 16/32-bit segment */
-		| (uint64_t)seg->g << 55 /* 4KB granularity */
-		| (seg->base & 0xff000000ULL) << 56; /* Base bits 24:31 */
-}
-
-static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
+static void setup_protected_mode(struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
 		.limit = 0xffffffff,
+		.selector = 1 << 3,
 		.present = 1,
+		.type = 11, /* Code: execute, read, accessed */
 		.dpl = 0,
 		.db = 1,
 		.s = 1, /* Code/data */
 		.l = 0,
 		.g = 1, /* 4KB granularity */
 	};
-	uint64_t *gdt;
 
 	sregs->cr0 |= CR0_PE; /* enter protected mode */
-	sregs->gdt.base = 0x1000;
-	sregs->gdt.limit = 3 * 8 - 1;
 
-	gdt = (void *)(vm->mem + sregs->gdt.base);
-	/* gdt[0] is the null segment */
-
-	seg.type = 11; /* Code: execute, read, accessed */
-	seg.selector = 1 << 3;
-	fill_segment_descriptor(gdt, &seg);
 	sregs->cs = seg;
 
 	seg.type = 3; /* Data: read/write, accessed */
 	seg.selector = 2 << 3;
-	fill_segment_descriptor(gdt, &seg);
-	sregs->ds = sregs->es = sregs->fs = sregs->gs
-		= sregs->ss = seg;
+	sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
 }
 
 extern const unsigned char code32[], code32_end[];
@@ -292,7 +265,7 @@ int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	setup_protected_mode(vm, &sregs);
+	setup_protected_mode(&sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
 		perror("KVM_SET_SREGS");
@@ -326,8 +299,6 @@ int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 	return check(vm, vcpu, 4);
 }
 
-extern const unsigned char code32_paged[], code32_paged_end[];
-
 static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	uint32_t pd_addr = 0x2000;
@@ -339,12 +310,9 @@ static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 
 	sregs->cr3 = pd_addr;
 	sregs->cr4 = CR4_PSE;
-	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->cr0 =
+		CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = 0;
-
-	/* We don't set cr0.pg here, because that causes a vm entry
-	   failure. It's not clear why. Instead, we set it in the VM
-	   code. */
 }
 
 int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
@@ -359,7 +327,7 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	setup_protected_mode(vm, &sregs);
+	setup_protected_mode(&sregs);
 	setup_paged_32bit_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
@@ -377,7 +345,7 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code32_paged, code32_paged_end-code32_paged);
+	memcpy(vm->mem, code32, code32_end-code32);
 
 	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
 		perror("KVM_RUN");
@@ -396,12 +364,12 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 
 extern const unsigned char code64[], code64_end[];
 
-static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
+static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
 		.limit = 0xffffffff,
-		.selector = 3 << 3,
+		.selector = 1 << 3,
 		.present = 1,
 		.type = 11, /* Code: execute, read, accessed */
 		.dpl = 0,
@@ -410,11 +378,12 @@ static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
 		.l = 1,
 		.g = 1, /* 4KB granularity */
 	};
-	uint64_t *gdt = (void *)(vm->mem + sregs->gdt.base);
 
-	sregs->gdt.limit = 4 * 8 - 1;
+	sregs->cs = seg;
 
-	fill_segment_descriptor(gdt, &seg);
+	seg.type = 3; /* Data: read/write, accessed */
+	seg.selector = 2 << 3;
+	sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
 }
 
 static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
@@ -434,13 +403,11 @@ static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
 
 	sregs->cr3 = pml4_addr;
 	sregs->cr4 = CR4_PAE;
-	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->cr0 =
+		CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = EFER_LME;
 
-	/* We don't set cr0.pg here, because that causes a vm entry
-	   failure. It's not clear why. Instead, we set it in the VM
-	   code. */
-	setup_64bit_code_segment(vm, sregs);
+	setup_64bit_code_segment(sregs);
 }
 
 int run_long_mode(struct vm *vm, struct vcpu *vcpu)
@@ -455,7 +422,6 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	setup_protected_mode(vm, &sregs);
 	setup_long_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
