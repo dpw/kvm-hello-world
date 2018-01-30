@@ -443,12 +443,25 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 
 	memcpy(vm->mem, code64, code64_end-code64);
 
-	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-		perror("KVM_RUN");
-		exit(1);
-	}
+	for (;;) {
+		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+			perror("KVM_RUN");
+			exit(1);
+		}
 
-	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
+		if (vcpu->kvm_run->exit_reason == KVM_EXIT_HLT)
+			return check(vm, vcpu, 2);
+
+		if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO
+		&& vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+		&& vcpu->kvm_run->io.port == 0xE9) {
+			char *p = (char *) vcpu->kvm_run;
+			fwrite(p + vcpu->kvm_run->io.data_offset,
+			       vcpu->kvm_run->io.size, 1, stdout);
+			fflush(stdout);
+			continue; /* Enter VM again. */
+		}
+
 		fprintf(stderr,
 			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
 			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
