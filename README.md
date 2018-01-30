@@ -24,7 +24,7 @@ qemu emulates all the devices making up the rest of a typical x86
 system.  qemu predates KVM, and can also operate independently of it,
 performing CPU virtualization in software instead.
 
-But if you want to learn about the details of LVM, qemu is not a great
+But if you want to learn about the details of KVM, qemu is not a great
 resource.  It's a big project with a lot of features and support for
 emulating many devices.
 
