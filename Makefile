@@ -13,4 +13,4 @@ payload.o: payload.ld code16.o code32.o code64.o
 
 .PHONY: clean
 clean:
-	rm kvm-hello-world code16.o code32.o code64.o payload.o
+	$(RM) kvm-hello-world code16.o code32.o code64.o payload.o
