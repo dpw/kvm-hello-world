@@ -70,6 +70,46 @@ struct vm {
 	char *mem;
 };
 
+static uint64_t sd(struct kvm_segment s)
+{
+	struct segment_descriptor {
+		uint64_t limit:16;
+		uint64_t base:24;
+		uint64_t type:4;
+		uint64_t s:1;
+		uint64_t dpl:2;
+		uint64_t present:1;
+		uint64_t limit_hi:4;
+		uint64_t avl:1;
+		uint64_t l:1;
+		uint64_t db:1;
+		uint64_t g:1;
+		uint64_t base_hi:8;
+	} __attribute__((packed));
+
+	union
+	{
+		struct segment_descriptor s;
+		uint64_t d;
+	} u;
+
+	u.s = (struct segment_descriptor)
+	{
+		.base = s.base & 0xFFFFFF,
+		.base_hi = s.base >> 24,
+		.type = s.type,
+		.present = s.present,
+		.dpl = s.dpl,
+		.db = s.db,
+		.s = s.s,
+		.l = s.l,
+		.g = s.g,
+		.avl = s.avl,
+	};
+
+	return u.d;
+}
+
 void vm_init(struct vm *vm, size_t mem_size)
 {
 	int api_ver;
@@ -227,7 +267,7 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 	return check(vm, vcpu, 2);
 }
 
-static void setup_protected_mode(struct kvm_sregs *sregs)
+static void setup_protected_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
@@ -241,6 +281,7 @@ static void setup_protected_mode(struct kvm_sregs *sregs)
 		.l = 0,
 		.g = 1, /* 4KB granularity */
 	};
+	uint64_t *gdt;
 
 	sregs->cr0 |= CR0_PE; /* enter protected mode */
 
@@ -249,6 +290,14 @@ static void setup_protected_mode(struct kvm_sregs *sregs)
 	seg.type = 3; /* Data: read/write, accessed */
 	seg.selector = 2 << 3;
 	sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
+
+	sregs->gdt.base = 0x1000;
+	sregs->gdt.limit = 3 * 8 - 1;
+
+	gdt = (void *)(vm->mem + sregs->gdt.base);
+	/* gdt[0] is the null segment */
+	gdt[1] = sd(sregs->cs);
+	gdt[2] = sd(sregs->ds);
 }
 
 extern const unsigned char code32[], code32_end[];
@@ -265,7 +314,7 @@ int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	setup_protected_mode(&sregs);
+	setup_protected_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
 		perror("KVM_SET_SREGS");
@@ -327,7 +376,7 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	setup_protected_mode(&sregs);
+	setup_protected_mode(vm, &sregs);
 	setup_paged_32bit_mode(vm, &sregs);
 
         if (ioctl(vcpu->fd, KVM_SET_SREGS, &sregs) < 0) {
