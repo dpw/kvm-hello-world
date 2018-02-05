@@ -87,14 +87,12 @@ static uint64_t sd(struct kvm_segment s)
 		uint64_t base_hi:8;
 	} __attribute__((packed));
 
-	union
-	{
+	union {
 		struct segment_descriptor s;
 		uint64_t d;
 	} u;
 
-	u.s = (struct segment_descriptor)
-	{
+	u.s = (struct segment_descriptor) {
 		.base = s.base & 0xFFFFFF,
 		.base_hi = s.base >> 24,
 		.type = s.type,
@@ -413,7 +411,7 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 
 extern const unsigned char code64[], code64_end[];
 
-static void setup_64bit_code_segment(struct kvm_sregs *sregs)
+static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
 {
 	struct kvm_segment seg = {
 		.base = 0,
@@ -427,12 +425,21 @@ static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 		.l = 1,
 		.g = 1, /* 4KB granularity */
 	};
+	uint64_t *gdt;
 
 	sregs->cs = seg;
 
 	seg.type = 3; /* Data: read/write, accessed */
 	seg.selector = 2 << 3;
 	sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
+
+	sregs->gdt.base = 0x1000;
+	sregs->gdt.limit = 3 * 8 - 1;
+
+	gdt = (void *)(vm->mem + sregs->gdt.base);
+	/* gdt[0] is the null segment */
+	gdt[1] = sd(sregs->cs);
+	gdt[2] = sd(sregs->ds);
 }
 
 static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
@@ -456,7 +463,7 @@ static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
 		CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = EFER_LME;
 
-	setup_64bit_code_segment(sregs);
+	setup_64bit_code_segment(vm, sregs);
 }
 
 int run_long_mode(struct vm *vm, struct vcpu *vcpu)
