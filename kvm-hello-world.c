@@ -10,58 +10,58 @@
 #include <linux/kvm.h>
 
 /* CR0 bits */
-#define CR0_PE 1
-#define CR0_MP (1 << 1)
-#define CR0_EM (1 << 2)
-#define CR0_TS (1 << 3)
-#define CR0_ET (1 << 4)
-#define CR0_NE (1 << 5)
-#define CR0_WP (1 << 16)
-#define CR0_AM (1 << 18)
-#define CR0_NW (1 << 29)
-#define CR0_CD (1 << 30)
-#define CR0_PG (1 << 31)
+#define CR0_PE 1u
+#define CR0_MP (1U << 1)
+#define CR0_EM (1U << 2)
+#define CR0_TS (1U << 3)
+#define CR0_ET (1U << 4)
+#define CR0_NE (1U << 5)
+#define CR0_WP (1U << 16)
+#define CR0_AM (1U << 18)
+#define CR0_NW (1U << 29)
+#define CR0_CD (1U << 30)
+#define CR0_PG (1U << 31)
 
 /* CR4 bits */
 #define CR4_VME 1
-#define CR4_PVI (1 << 1)
-#define CR4_TSD (1 << 2)
-#define CR4_DE (1 << 3)
-#define CR4_PSE (1 << 4)
-#define CR4_PAE (1 << 5)
-#define CR4_MCE (1 << 6)
-#define CR4_PGE (1 << 7)
-#define CR4_PCE (1 << 8)
-#define CR4_OSFXSR (1 << 8)
-#define CR4_OSXMMEXCPT (1 << 10)
-#define CR4_UMIP (1 << 11)
-#define CR4_VMXE (1 << 13)
-#define CR4_SMXE (1 << 14)
-#define CR4_FSGSBASE (1 << 16)
-#define CR4_PCIDE (1 << 17)
-#define CR4_OSXSAVE (1 << 18)
-#define CR4_SMEP (1 << 20)
-#define CR4_SMAP (1 << 21)
+#define CR4_PVI (1U << 1)
+#define CR4_TSD (1U << 2)
+#define CR4_DE (1U << 3)
+#define CR4_PSE (1U << 4)
+#define CR4_PAE (1U << 5)
+#define CR4_MCE (1U << 6)
+#define CR4_PGE (1U << 7)
+#define CR4_PCE (1U << 8)
+#define CR4_OSFXSR (1U << 8)
+#define CR4_OSXMMEXCPT (1U << 10)
+#define CR4_UMIP (1U << 11)
+#define CR4_VMXE (1U << 13)
+#define CR4_SMXE (1U << 14)
+#define CR4_FSGSBASE (1U << 16)
+#define CR4_PCIDE (1U << 17)
+#define CR4_OSXSAVE (1U << 18)
+#define CR4_SMEP (1U << 20)
+#define CR4_SMAP (1U << 21)
 
 #define EFER_SCE 1
-#define EFER_LME (1 << 8)
-#define EFER_LMA (1 << 10)
-#define EFER_NXE (1 << 11)
+#define EFER_LME (1U << 8)
+#define EFER_LMA (1U << 10)
+#define EFER_NXE (1U << 11)
 
 /* 32-bit page directory entry bits */
 #define PDE32_PRESENT 1
-#define PDE32_RW (1 << 1)
-#define PDE32_USER (1 << 2)
-#define PDE32_PS (1 << 7)
+#define PDE32_RW (1U << 1)
+#define PDE32_USER (1U << 2)
+#define PDE32_PS (1U << 7)
 
 /* 64-bit page * entry bits */
 #define PDE64_PRESENT 1
-#define PDE64_RW (1 << 1)
-#define PDE64_USER (1 << 2)
-#define PDE64_ACCESSED (1 << 5)
-#define PDE64_DIRTY (1 << 6)
-#define PDE64_PS (1 << 7)
-#define PDE64_G (1 << 8)
+#define PDE64_RW (1U << 1)
+#define PDE64_USER (1U << 2)
+#define PDE64_ACCESSED (1U << 5)
+#define PDE64_DIRTY (1U << 6)
+#define PDE64_PS (1U << 7)
+#define PDE64_G (1U << 8)
 
 
 struct vm {
@@ -326,8 +326,6 @@ int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 	return check(vm, vcpu, 4);
 }
 
-extern const unsigned char code32_paged[], code32_paged_end[];
-
 static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 {
 	uint32_t pd_addr = 0x2000;
@@ -339,12 +337,9 @@ static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
 
 	sregs->cr3 = pd_addr;
 	sregs->cr4 = CR4_PSE;
-	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->cr0
+		= CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = 0;
-
-	/* We don't set cr0.pg here, because that causes a vm entry
-	   failure. It's not clear why. Instead, we set it in the VM
-	   code. */
 }
 
 int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
@@ -377,7 +372,7 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code32_paged, code32_paged_end-code32_paged);
+	memcpy(vm->mem, code32, code32_end-code32);
 
 	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
 		perror("KVM_RUN");
@@ -434,12 +429,10 @@ static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
 
 	sregs->cr3 = pml4_addr;
 	sregs->cr4 = CR4_PAE;
-	sregs->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM;
+	sregs->cr0
+		= CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
 	sregs->efer = EFER_LME;
 
-	/* We don't set cr0.pg here, because that causes a vm entry
-	   failure. It's not clear why. Instead, we set it in the VM
-	   code. */
 	setup_64bit_code_segment(vm, sregs);
 }
 
