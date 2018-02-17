@@ -396,7 +396,7 @@ static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
 	struct kvm_segment seg = {
 		.base = 0,
 		.limit = 0xffffffff,
-		.selector = 3 << 3,
+		.selector = 1 << 3,
 		.present = 1,
 		.type = 11, /* Code: execute, read, accessed */
 		.dpl = 0,
@@ -407,9 +407,8 @@ static void setup_64bit_code_segment(struct vm *vm, struct kvm_sregs *sregs)
 	};
 	uint64_t *gdt = (void *)(vm->mem + sregs->gdt.base);
 
-	sregs->gdt.limit = 4 * 8 - 1;
-
 	fill_segment_descriptor(gdt, &seg);
+	sregs->cs = seg;
 }
 
 static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
