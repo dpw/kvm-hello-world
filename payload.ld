@@ -1,17 +1,18 @@
 SECTIONS
 {
         .payload16 0 : {
-                 code16.o(.text)
+                guest16 = .;
+                guest16.o(.text)
+                guest16_end = .;
         }
         .payload32 0 : AT(LOADADDR(.payload16)+SIZEOF(.payload16)) {
-                 code32.o(.text)
+                guest32 = .;
+                guest32.img.o
+                guest32_end = .;
         }
         .payload64 0 : AT(LOADADDR(.payload32)+SIZEOF(.payload32)) {
-                 code64 = .;
-                 code64.o(.start)
-                 code64.o(.text*)
-                 code64.o(.rodata*)
-                 code64.o(.data*)
-                 code64_end = .;
+                guest64 = .;
+                guest64.img.o
+                guest64_end = .;
         }
 }

@@ -153,11 +153,41 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	}
 }
 
-int check(struct vm *vm, struct vcpu *vcpu, size_t sz)
+int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
 	uint64_t memval = 0;
 
+	for (;;) {
+		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+			perror("KVM_RUN");
+			exit(1);
+		}
+
+		switch (vcpu->kvm_run->exit_reason) {
+		case KVM_EXIT_HLT:
+			goto check;
+
+		case KVM_EXIT_IO:
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+			    && vcpu->kvm_run->io.port == 0xE9) {
+				char *p = (char *)vcpu->kvm_run;
+				fwrite(p + vcpu->kvm_run->io.data_offset,
+				       vcpu->kvm_run->io.size, 1, stdout);
+				fflush(stdout);
+				continue;
+			}
+
+			/* fall through */
+		default:
+			fprintf(stderr,	"Got exit_reason %d,"
+				" expected KVM_EXIT_HLT (%d)\n",
+				vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
+			exit(1);
+		}
+	}
+
+ check:
 	if (ioctl(vcpu->fd, KVM_GET_REGS, &regs) < 0) {
 		perror("KVM_GET_REGS");
 		exit(1);
@@ -178,7 +208,7 @@ int check(struct vm *vm, struct vcpu *vcpu, size_t sz)
 	return 1;
 }
 
-extern const unsigned char code16[], code16_end[];
+extern const unsigned char guest16[], guest16_end[];
 
 int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 {
@@ -210,21 +240,8 @@ int run_real_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code16, code16_end-code16);
-
-	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-		perror("KVM_RUN");
-		exit(1);
-	}
-
-	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
-		fprintf(stderr,
-			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
-			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
-		exit(1);
-	}
-
-	return check(vm, vcpu, 2);
+	memcpy(vm->mem, guest16, guest16_end-guest16);
+	return run_vm(vm, vcpu, 2);
 }
 
 static void setup_protected_mode(struct kvm_sregs *sregs)
@@ -251,7 +268,7 @@ static void setup_protected_mode(struct kvm_sregs *sregs)
 	sregs->ds = sregs->es = sregs->fs = sregs->gs = sregs->ss = seg;
 }
 
-extern const unsigned char code32[], code32_end[];
+extern const unsigned char guest32[], guest32_end[];
 
 int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 {
@@ -282,21 +299,8 @@ int run_protected_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code32, code32_end-code32);
-
-	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-		perror("KVM_RUN");
-		exit(1);
-	}
-
-	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
-		fprintf(stderr,
-			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
-			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
-		exit(1);
-	}
-
-	return check(vm, vcpu, 4);
+	memcpy(vm->mem, guest32, guest32_end-guest32);
+	return run_vm(vm, vcpu, 4);
 }
 
 static void setup_paged_32bit_mode(struct vm *vm, struct kvm_sregs *sregs)
@@ -345,24 +349,11 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code32, code32_end-code32);
-
-	if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-		perror("KVM_RUN");
-		exit(1);
-	}
-
-	if (vcpu->kvm_run->exit_reason != KVM_EXIT_HLT) {
-		fprintf(stderr,
-			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
-			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
-		exit(1);
-	}
-
-	return check(vm, vcpu, 4);
+	memcpy(vm->mem, guest32, guest32_end-guest32);
+	return run_vm(vm, vcpu, 4);
 }
 
-extern const unsigned char code64[], code64_end[];
+extern const unsigned char guest64[], guest64_end[];
 
 static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 {
@@ -441,34 +432,8 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 		exit(1);
 	}
 
-	memcpy(vm->mem, code64, code64_end-code64);
-
-	for (;;) {
-		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-			perror("KVM_RUN");
-			exit(1);
-		}
-
-		if (vcpu->kvm_run->exit_reason == KVM_EXIT_HLT)
-			return check(vm, vcpu, 2);
-
-		if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO
-		&& vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
-		&& vcpu->kvm_run->io.port == 0xE9) {
-			char *p = (char *) vcpu->kvm_run;
-			fwrite(p + vcpu->kvm_run->io.data_offset,
-			       vcpu->kvm_run->io.size, 1, stdout);
-			fflush(stdout);
-			continue; /* Enter VM again. */
-		}
-
-		fprintf(stderr,
-			"Got exit_reason %d, expected KVM_EXIT_HLT (%d)\n",
-			vcpu->kvm_run->exit_reason, KVM_EXIT_HLT);
-		exit(1);
-	}
-
-	return check(vm, vcpu, 4);
+	memcpy(vm->mem, guest64, guest64_end-guest64);
+	return run_vm(vm, vcpu, 8);
 }
 
 
