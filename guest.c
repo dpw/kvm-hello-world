@@ -9,7 +9,9 @@ void
 __attribute__((noreturn))
 __attribute__((section(".start")))
 _start(void) {
-	for (const char *p = "Hello, world!\n"; *p; ++p)
+	const char *p;
+
+	for (p = "Hello, world!\n"; *p; ++p)
 		outb(0xE9, *p);
 
 	*(long *) 0x400 = 42;
