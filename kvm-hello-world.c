@@ -396,7 +396,7 @@ static void setup_long_mode(struct vm *vm, struct kvm_sregs *sregs)
 	sregs->cr4 = CR4_PAE;
 	sregs->cr0
 		= CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_PG;
-	sregs->efer = EFER_LME;
+	sregs->efer = EFER_LME | EFER_LMA;
 
 	setup_64bit_code_segment(sregs);
 }
