@@ -1,6 +1,7 @@
-# A minimal KVM example
+##KVM-Kernel Based Virtual Machine
 
-kvm-hello-world is a very simple example program to demonstrate the
+# A minimal KVM example
+KVM-hello-world is a very simple example program to demonstrate the
 use of the KVM API provided by the Linux kernel.  It acts as a very
 simple VM host, and runs a trivial program in a VM.  I tested it on
 Intel processors with the VMX hardware virtualization extensions.  It
