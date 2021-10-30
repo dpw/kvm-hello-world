@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -Werror -O2 -shared
+CFLAGS = -Wall -Wextra -Werror -O2
 
 .PHONY: run
 run: kvm-hello-world
