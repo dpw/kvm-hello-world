@@ -32,11 +32,13 @@
 #define CR4_MCE (1U << 6)
 #define CR4_PGE (1U << 7)
 #define CR4_PCE (1U << 8)
-#define CR4_OSFXSR (1U << 8)
+// #define CR4_OSFXSR (1U << 8)
+#define CR4_OSFXSR (1U << 9)
 #define CR4_OSXMMEXCPT (1U << 10)
 #define CR4_UMIP (1U << 11)
 #define CR4_VMXE (1U << 13)
-#define CR4_SMXE (1U << 14)
+// #define CR4_SMXE (1U << 14)
+#define CR8_SMXE (1U << 14)
 #define CR4_FSGSBASE (1U << 16)
 #define CR4_PCIDE (1U << 17)
 #define CR4_OSXSAVE (1U << 18)
@@ -166,6 +168,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 
 		switch (vcpu->kvm_run->exit_reason) {
 		case KVM_EXIT_HLT:
+			printf("vmexit hlt\n");
 			goto check;
 
 		case KVM_EXIT_IO:
