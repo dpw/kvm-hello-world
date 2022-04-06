@@ -1,3 +1,20 @@
+# 工作目标
+
+1. 理解kvm和ept结构
+2. 测试hypercall
+3. 测试vmfunc
+
+
+
+
+
+
+
+
+
+
+
+
 # A minimal KVM example
 
 kvm-hello-world is a very simple example program to demonstrate the
