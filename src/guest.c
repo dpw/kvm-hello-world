@@ -20,6 +20,15 @@ static inline long kvm_hypercall0(unsigned int nr)
 	return ret;
 }
 
+static inline long kvm_vmfunc(unsigned int eptp)
+{
+    long ret;
+    asm volatile("vmfunc"
+            : "=q"(ret)
+            : "c" (eptp), "a" (0)
+            : "cc");
+    return ret;
+}
 
 void
 __attribute__((noreturn))
@@ -33,6 +42,8 @@ _start(void) {
 	*(long *) 0x400 = 42;
 
     kvm_hypercall0(KVM_HC_HELLO_HYPERCALL);
+
+    kvm_vmfunc(0);
 
 	for (;;)
 		asm("hlt" : /* empty */ : "a" (42) : "memory");

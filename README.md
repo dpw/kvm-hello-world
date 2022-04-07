@@ -9,7 +9,12 @@
 
 
 
+# helper ebpfs
 
+```
+sudo bpftrace -e 'kprobe:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, *arg0, arg1, *arg2);}'
+sudo bpftrace -e 'kprobe:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, arg0, arg1, arg2);}'
+```
 
 
 
