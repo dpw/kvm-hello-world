@@ -14,6 +14,11 @@
 ```
 sudo bpftrace -e 'kprobe:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, *arg0, arg1, *arg2);}'
 sudo bpftrace -e 'kprobe:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, arg0, arg1, arg2);}'
+
+sudo bpftrace -e 'kfunc:vmx_load_mmu_pgd {printf("%s %016lx %ld %d\n", comm, args->vcpu, args->root_hpa, args->root_level); @[kstack()] = count(); @root_hpa[args->root_hpa] = count(); }'
+
+
+sudo bpftrace -e 'kfunc:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, args->vcpu, args->cpu, args->buddy); @[kstack()] = count(); @vmcs_pos[args->buddy] = count();}'
 ```
 
 
