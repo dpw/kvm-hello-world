@@ -43,7 +43,7 @@ _start(void) {
 
     kvm_hypercall0(KVM_HC_HELLO_HYPERCALL);
 
-    kvm_vmfunc(0);
+    // kvm_vmfunc(0);
 
 	for (;;)
 		asm("hlt" : /* empty */ : "a" (42) : "memory");
