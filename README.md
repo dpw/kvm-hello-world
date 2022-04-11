@@ -2,15 +2,60 @@
 
 1. 理解kvm和ept结构
 2. 测试hypercall
-3. 测试vmfunc
+3. 测试vmfunc (vm_function control的配置在init_vmcs里， )
 
-
+**vmcs的具体布局在intel手册的 附录里面，24章只是介绍**
 
 # custom hypercall 
 
 [Implementing a custom hypercall in kvm](https://stackoverflow.com/questions/33590843/implementing-a-custom-hypercall-in-kvm)
 
+主要增加的代码在 `arch/x86/kvm/x86.c` 的`kvm_emulate_hypercall` 里面，注意这里不能直接调用 `vmcs_read`引起系统崩溃（只能在`vmx.c`里面用）
 
+# enable vmfunction
+
+代码增加在 `arch/x86/kvm/vmx/vmx.c`
+
+* enable control bits(在 secondary control bits里面，linux默认enable) 
+* enable vm_function (只有第0个function，即eptp_switch是有效的)，在`init_vmcs`中配置 
+* 给`EPTP_LIST_ADDRESS` 分配一个4k物理页，里面能够保存256个可行的ept-pgd
+* 最后将可以替换的EPT写入 `EPTP_LIST_ADDRESS` 页里面（在`vmx_load_mmu_pgd`）
+
+```
+// arch/x86/kvm/vmx/vmx.c
+// init_vmcs
+	unsigned long *eptps;
+	unsigned long ept_pointer
+    ...
+	// --------------- vm_function_enable-----------------------
+	if (cpu_has_vmx_vmfunc()) {
+		// vmcs_write64();
+		vmcs_write64(VM_FUNCTION_CONTROL, 1);
+		eptps = (unsigned long *) __get_free_page(GFP_KERNEL);
+		ept_pointer = vmcs_read64(EPT_POINTER);
+		pr_info("============== init vmcs: ept_pointer %016lx =========== eptps: %016lx %016lx\n", ept_pointer,  (unsigned long)eptps, (unsigned long)virt_to_phys(eptps));
+		eptps[0] = ept_pointer;
+		eptps[1] = ept_pointer;
+		vmcs_write64(EPTP_LIST_ADDRESS, virt_to_phys(eptps));
+	}
+
+
+
+// vmx_load_mmu_pgd
+	u64 eptp_list_address;
+	u64 *eptps;
+    ....
+// ====================================================
+		eptp_list_address = vmcs_read64(EPTP_LIST_ADDRESS);
+		eptps = (u64 *) phys_to_virt(eptp_list_address);
+		eptps[0] = eptp;
+		eptps[1] = eptp;
+		pr_info("ept_pointer:       %016lx\n", (unsigned long)eptp);
+		pr_info("eptp_list_address: %016lx\n",  (unsigned long)eptp_list_address);
+		pr_info("eptps(virt):       %016lx\n", (unsigned long)eptps);
+// ====================================================
+
+```
 # helper ebpfs
 
 ```

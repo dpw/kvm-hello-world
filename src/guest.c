@@ -42,8 +42,13 @@ _start(void) {
 	*(long *) 0x400 = 42;
 
     kvm_hypercall0(KVM_HC_HELLO_HYPERCALL);
+    kvm_vmfunc(0);
 
-    // kvm_vmfunc(0);
+	kvm_hypercall0(KVM_HC_HELLO_HYPERCALL);
+	kvm_vmfunc(1);
+
+	kvm_hypercall0(KVM_HC_HELLO_HYPERCALL);
+	kvm_vmfunc(2);
 
 	for (;;)
 		asm("hlt" : /* empty */ : "a" (42) : "memory");
