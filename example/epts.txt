@@ -222,7 +222,7 @@ CPU 1/KVM ffff964b02e00000 5643853824 4
     entry_SYSCALL_64_after_hwframe+68
 ]: 169471
 
-@root_hpa[5346537472]: 1
+@root_hpa[5346537472   '0x13eadb000']: 1
 @root_hpa[5321027584]: 1
 @root_hpa[17150787584]: 1
 @root_hpa[4641030144]: 1
@@ -265,7 +265,7 @@ CPU 1/KVM ffff964b02e00000 5643853824 4
 @root_hpa[4535357440]: 2
 @root_hpa[5412249600]: 2
 @root_hpa[4672737280]: 2
-@root_hpa[5643853824]: 2
+@root_hpa[5643853824  '0x150666000']: 2
 @root_hpa[6076993536]: 2
 @root_hpa[5414834176]: 3
 @root_hpa[6099214336]: 3

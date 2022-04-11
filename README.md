@@ -6,7 +6,9 @@
 
 
 
+# custom hypercall 
 
+[Implementing a custom hypercall in kvm](https://stackoverflow.com/questions/33590843/implementing-a-custom-hypercall-in-kvm)
 
 
 # helper ebpfs
