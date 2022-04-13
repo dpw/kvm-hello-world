@@ -66,6 +66,15 @@ sudo bpftrace -e 'kfunc:vmx_load_mmu_pgd {printf("%s %016lx %ld %d\n", comm, arg
 
 
 sudo bpftrace -e 'kfunc:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, args->vcpu, args->cpu, args->buddy); @[kstack()] = count(); @vmcs_pos[args->buddy] = count();}'
+
+sudo bpftrace -e 'kfunc:construct_eptp {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @a[kstack()] = count();}  kfunc:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @b[kstack()] = count();}  '
+
+sudo bpftrace -e 'kfunc:kvm_tdp_page_fault {printf("%s %016lx %016lx %d %u\n", comm, args->vcpu, args->gpa, args->error_code, args->prefault);  @c[kstack()] = count();}'
+
+
+sudo bpftrace -e 'kfunc:kvm_arch_vcpu_ioctl_run {printf("%s vcpu:%016lx \n", comm, args->vcpu);  @a[kstack()]=count()}                 kfunc:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @b[kstack()] = count();}                 kfunc:kvm_tdp_page_fault {printf("%s %016lx %016lx %d %u\n", comm, args->vcpu, args->gpa, args->error_code, args->prefault);  @c[kstack()] = count();}                 kfunc:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, args->vcpu, args->cpu, args->buddy); @d[kstack()] = count(); @vmcs_pos[args->buddy] = count();}'
+
+
 ```
 
 
