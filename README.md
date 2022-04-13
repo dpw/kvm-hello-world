@@ -6,6 +6,18 @@
 
 **vmcs的具体布局在intel手册的 附录里面，24章只是介绍**
 
+
+http://www.noobyard.com/article/p-swogbkhr-m.html
+
+这篇blog给了我不少启示，我们首先创建一个shadow-mmu
+
+其次理解ept结构之后，在真正需要处理的地方
+
+1. root_hpa地址
+2. tdp_page_fault的位置
+
+同步更新ept即可
+
 # custom hypercall 
 
 [Implementing a custom hypercall in kvm](https://stackoverflow.com/questions/33590843/implementing-a-custom-hypercall-in-kvm)
