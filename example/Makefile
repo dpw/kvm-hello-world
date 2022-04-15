@@ -11,7 +11,7 @@ kvm-hello-world: kvm-hello-world.o payload.o
 	$(CC) $^ -o $@
 
 payload.o: payload.ld guest16.o guest32.img.o guest64.img.o
-	$(LD) -T $< -o $@
+	$(LD) -r -T $< -o $@
 
 guest64.o: guest.c
 	$(CC) $(CFLAGS) -m64 -ffreestanding -fno-pic -c -o $@ $^

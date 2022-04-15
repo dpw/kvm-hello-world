@@ -1,3 +1,98 @@
+# 工作目标
+
+1. 理解kvm和ept结构
+2. 测试hypercall
+3. 测试vmfunc (vm_function control的配置在init_vmcs里， )
+
+**vmcs的具体布局在intel手册的 附录里面，24章只是介绍**
+
+
+http://www.noobyard.com/article/p-swogbkhr-m.html
+
+这篇blog给了我不少启示，我们首先创建一个shadow-mmu
+
+其次理解ept结构之后，在真正需要处理的地方
+
+1. root_hpa地址
+2. tdp_page_fault的位置
+
+同步更新ept即可
+
+# custom hypercall 
+
+[Implementing a custom hypercall in kvm](https://stackoverflow.com/questions/33590843/implementing-a-custom-hypercall-in-kvm)
+
+主要增加的代码在 `arch/x86/kvm/x86.c` 的`kvm_emulate_hypercall` 里面，注意这里不能直接调用 `vmcs_read`引起系统崩溃（只能在`vmx.c`里面用）
+
+# enable vmfunction
+
+代码增加在 `arch/x86/kvm/vmx/vmx.c`
+
+* enable control bits(在 secondary control bits里面，linux默认enable) 
+* enable vm_function (只有第0个function，即eptp_switch是有效的)，在`init_vmcs`中配置 
+* 给`EPTP_LIST_ADDRESS` 分配一个4k物理页，里面能够保存256个可行的ept-pgd
+* 最后将可以替换的EPT写入 `EPTP_LIST_ADDRESS` 页里面（在`vmx_load_mmu_pgd`）
+
+```
+// arch/x86/kvm/vmx/vmx.c
+// init_vmcs
+	unsigned long *eptps;
+	unsigned long ept_pointer
+    ...
+	// --------------- vm_function_enable-----------------------
+	if (cpu_has_vmx_vmfunc()) {
+		// vmcs_write64();
+		vmcs_write64(VM_FUNCTION_CONTROL, 1);
+		eptps = (unsigned long *) __get_free_page(GFP_KERNEL);
+		ept_pointer = vmcs_read64(EPT_POINTER);
+		pr_info("============== init vmcs: ept_pointer %016lx =========== eptps: %016lx %016lx\n", ept_pointer,  (unsigned long)eptps, (unsigned long)virt_to_phys(eptps));
+		eptps[0] = ept_pointer;
+		eptps[1] = ept_pointer;
+		vmcs_write64(EPTP_LIST_ADDRESS, virt_to_phys(eptps));
+	}
+
+
+
+// vmx_load_mmu_pgd
+	u64 eptp_list_address;
+	u64 *eptps;
+    ....
+// ====================================================
+		eptp_list_address = vmcs_read64(EPTP_LIST_ADDRESS);
+		eptps = (u64 *) phys_to_virt(eptp_list_address);
+		eptps[0] = eptp;
+		eptps[1] = eptp;
+		pr_info("ept_pointer:       %016lx\n", (unsigned long)eptp);
+		pr_info("eptp_list_address: %016lx\n",  (unsigned long)eptp_list_address);
+		pr_info("eptps(virt):       %016lx\n", (unsigned long)eptps);
+// ====================================================
+
+```
+# helper ebpfs
+
+```
+sudo bpftrace -e 'kprobe:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, *arg0, arg1, *arg2);}'
+sudo bpftrace -e 'kprobe:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, arg0, arg1, arg2);}'
+
+sudo bpftrace -e 'kfunc:vmx_load_mmu_pgd {printf("%s %016lx %ld %d\n", comm, args->vcpu, args->root_hpa, args->root_level); @[kstack()] = count(); @root_hpa[args->root_hpa] = count(); }'
+
+
+sudo bpftrace -e 'kfunc:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, args->vcpu, args->cpu, args->buddy); @[kstack()] = count(); @vmcs_pos[args->buddy] = count();}'
+
+sudo bpftrace -e 'kfunc:construct_eptp {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @a[kstack()] = count();}  kfunc:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @b[kstack()] = count();}  '
+
+sudo bpftrace -e 'kfunc:kvm_tdp_page_fault {printf("%s %016lx %016lx %d %u\n", comm, args->vcpu, args->gpa, args->error_code, args->prefault);  @c[kstack()] = count();}'
+
+
+sudo bpftrace -e 'kfunc:kvm_arch_vcpu_ioctl_run {printf("%s vcpu:%016lx \n", comm, args->vcpu);  @a[kstack()]=count()}                 kfunc:vmx_load_mmu_pgd {printf("%s %016lx %016lx %d\n", comm, args->vcpu, args->root_hpa, args->root_level);  @b[kstack()] = count();}                 kfunc:kvm_tdp_page_fault {printf("%s %016lx %016lx %d %u\n", comm, args->vcpu, args->gpa, args->error_code, args->prefault);  @c[kstack()] = count();}                 kfunc:vmx_vcpu_load_vmcs {printf("%s %016lx %d %016lx\n", comm, args->vcpu, args->cpu, args->buddy); @d[kstack()] = count(); @vmcs_pos[args->buddy] = count();}'
+
+
+```
+
+
+
+
+
 # A minimal KVM example
 
 kvm-hello-world is a very simple example program to demonstrate the
@@ -73,3 +168,155 @@ mechanism, without notifying the userspace VM host program of the VM
 exits caused by these instructions.  So we need some other way to
 trigger a VM exit.  HLT is convenient because it is a single-byte
 instruction.
+
+
+In single file 
+
+```
+/* Sample code for /dev/kvm API
+ *
+ * Copyright (c) 2015 Intel Corporation
+ * Author: Josh Triplett <josh@joshtriplett.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+#include <err.h>
+#include <fcntl.h>
+#include <linux/kvm.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+int main(void)
+{
+    int kvm, vmfd, vcpufd, ret;
+    const uint8_t code[] = {
+        0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
+        0x00, 0xd8,       /* add %bl, %al */
+        0x04, '0',        /* add $'0', %al */
+        0xee,             /* out %al, (%dx) */
+        0xb0, '\n',       /* mov $'\n', %al */
+        0xee,             /* out %al, (%dx) */
+        0xf4,             /* hlt */
+    };
+    uint8_t *mem;
+    struct kvm_sregs sregs;
+    size_t mmap_size;
+    struct kvm_run *run;
+
+    kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
+    if (kvm == -1)
+        err(1, "/dev/kvm");
+
+    /* Make sure we have the stable version of the API */
+    ret = ioctl(kvm, KVM_GET_API_VERSION, NULL);
+    if (ret == -1)
+        err(1, "KVM_GET_API_VERSION");
+    if (ret != 12)
+        errx(1, "KVM_GET_API_VERSION %d, expected 12", ret);
+
+    vmfd = ioctl(kvm, KVM_CREATE_VM, (unsigned long)0);
+    if (vmfd == -1)
+        err(1, "KVM_CREATE_VM");
+
+    /* Allocate one aligned page of guest memory to hold the code. */
+    mem = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (!mem)
+        err(1, "allocating guest memory");
+    memcpy(mem, code, sizeof(code));
+
+    /* Map it to the second page frame (to avoid the real-mode IDT at 0). */
+    struct kvm_userspace_memory_region region = {
+        .slot = 0,
+        .guest_phys_addr = 0x1000,
+        .memory_size = 0x1000,
+        .userspace_addr = (uint64_t)mem,
+    };
+    ret = ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &region);
+    if (ret == -1)
+        err(1, "KVM_SET_USER_MEMORY_REGION");
+
+    vcpufd = ioctl(vmfd, KVM_CREATE_VCPU, (unsigned long)0);
+    if (vcpufd == -1)
+        err(1, "KVM_CREATE_VCPU");
+
+    /* Map the shared kvm_run structure and following data. */
+    ret = ioctl(kvm, KVM_GET_VCPU_MMAP_SIZE, NULL);
+    if (ret == -1)
+        err(1, "KVM_GET_VCPU_MMAP_SIZE");
+    mmap_size = ret;
+    if (mmap_size < sizeof(*run))
+        errx(1, "KVM_GET_VCPU_MMAP_SIZE unexpectedly small");
+    run = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, vcpufd, 0);
+    if (!run)
+        err(1, "mmap vcpu");
+
+    /* Initialize CS to point at 0, via a read-modify-write of sregs. */
+    ret = ioctl(vcpufd, KVM_GET_SREGS, &sregs);
+    if (ret == -1)
+        err(1, "KVM_GET_SREGS");
+    sregs.cs.base = 0;
+    sregs.cs.selector = 0;
+    ret = ioctl(vcpufd, KVM_SET_SREGS, &sregs);
+    if (ret == -1)
+        err(1, "KVM_SET_SREGS");
+
+    /* Initialize registers: instruction pointer for our code, addends, and
+     * initial flags required by x86 architecture. */
+    struct kvm_regs regs = {
+        .rip = 0x1000,
+        .rax = 2,
+        .rbx = 2,
+        .rflags = 0x2,
+    };
+    ret = ioctl(vcpufd, KVM_SET_REGS, &regs);
+    if (ret == -1)
+        err(1, "KVM_SET_REGS");
+
+    /* Repeatedly run code and handle VM exits. */
+    while (1) {
+        ret = ioctl(vcpufd, KVM_RUN, NULL);
+        if (ret == -1)
+            err(1, "KVM_RUN");
+        switch (run->exit_reason) {
+        case KVM_EXIT_HLT:
+            puts("KVM_EXIT_HLT");
+            return 0;
+        case KVM_EXIT_IO:
+            if (run->io.direction == KVM_EXIT_IO_OUT && run->io.size == 1 && run->io.port == 0x3f8 && run->io.count == 1)
+                putchar(*(((char *)run) + run->io.data_offset));
+            else
+                errx(1, "unhandled KVM_EXIT_IO");
+            break;
+        case KVM_EXIT_FAIL_ENTRY:
+            errx(1, "KVM_EXIT_FAIL_ENTRY: hardware_entry_failure_reason = 0x%llx",
+                 (unsigned long long)run->fail_entry.hardware_entry_failure_reason);
+        case KVM_EXIT_INTERNAL_ERROR:
+            errx(1, "KVM_EXIT_INTERNAL_ERROR: suberror = 0x%x", run->internal.suberror);
+        default:
+            errx(1, "exit_reason = 0x%x", run->exit_reason);
+        }
+    }
+}
+```
