@@ -4,8 +4,7 @@ kvm-hello-world is a very simple example program to demonstrate the
 use of the KVM API provided by the Linux kernel.  It acts as a very
 simple VM host, and runs a trivial program in a VM.  I tested it on
 Intel processors with the VMX hardware virtualization extensions.  It
-*might* work on AMD processors with AMD-V, but that hasn't been
-tested.
+has also been tested on AMD processors with AMD-V.
 
 ## Background
 
