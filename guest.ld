@@ -3,6 +3,7 @@ SECTIONS
 {
         .start : { *(.start) }
         .text : { *(.text*) }
-        .rodata : { *(.rodata) }
+        .rodata : { *(.rodata*) }
         .data : { *(.data) }
+        /DISCARD/ : { *(.note*) }
 }
