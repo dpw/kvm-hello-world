@@ -2,7 +2,7 @@ SECTIONS
 {
         .payload16 0 : {
                 guest16 = .;
-                guest16.o(.text)
+                guest16.img.o
                 guest16_end = .;
         }
         .payload32 0 : AT(LOADADDR(.payload16)+SIZEOF(.payload16)) {
