@@ -129,6 +129,47 @@ struct vcpu {
 	struct kvm_run *kvm_run;
 };
 
+/* Give the guest the CPUID features that KVM supports.  Without this,
+ * the vCPU's CPUID is empty, so KVM considers features such as long
+ * mode to be absent and rejects attempts to enable them (e.g. setting
+ * EFER.LME via KVM_SET_SREGS fails with EINVAL). */
+static void setup_cpuid(struct vm *vm, struct vcpu *vcpu)
+{
+	struct kvm_cpuid2 *cpuid;
+	int nent = 64;
+
+	// We can't tell how big the buffer needs to be without
+	// calling KVM_GET_SUPPORTED_CPUID and expanding it upon
+	// E2BIG.
+	for (;;) {
+		cpuid = calloc(1, sizeof(*cpuid)
+			       + nent * sizeof(struct kvm_cpuid_entry2));
+		if (!cpuid) {
+			perror("calloc");
+			exit(1);
+		}
+
+		cpuid->nent = nent;
+		if (ioctl(vm->sys_fd, KVM_GET_SUPPORTED_CPUID, cpuid) == 0)
+			break;
+
+		if (errno != E2BIG) {
+			perror("KVM_GET_SUPPORTED_CPUID");
+			exit(1);
+		}
+
+		free(cpuid);
+		nent *= 2;
+	}
+
+	if (ioctl(vcpu->fd, KVM_SET_CPUID2, cpuid) < 0) {
+		perror("KVM_SET_CPUID2");
+		exit(1);
+	}
+
+	free(cpuid);
+}
+
 void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 {
 	int vcpu_mmap_size;
@@ -151,6 +192,8 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 		perror("mmap kvm_run");
 		exit(1);
 	}
+
+	setup_cpuid(vm, vcpu);
 }
 
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
